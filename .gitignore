@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Credentials: copy .env.example to .env and fill in your keys.
+.env
+.env.*
+!.env.example
+
+# Experiment output
+logs/
+runs/
+
+# Container images (build with scripts/build_images.sh)
+*.sif
+*-sandbox/
+images/build/
+.apptainer/
+apptainer-cache/
+.tmp/
+
+.DS_Store

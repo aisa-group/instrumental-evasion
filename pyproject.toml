@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "instrumental-evasion"
+version = "1.0.0"
+description = "Code for 'Instrumental Monitor Evasion Emerges Under Ordinary Task Pressure'"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE.md"]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "PyYAML==6.0.3",
+    "anthropic==1.0.0",
+    "openai==3.2.0",
+    "httpx==0.28.1",
+    "pydantic==2.13.4",
+    "python-dotenv==1.2.3",
+]
+
+[project.optional-dependencies]
+# The Modal runtime (`--runtime modal`). Apptainer and Docker need no extra.
+modal = ["modal[api-proxy-support]==1.5.5"]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff>=0.13",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/instrumental_evasion"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [
+    "src/instrumental_evasion/tasks/taubench/vendor",
+    "src/instrumental_evasion/tasks/terminal_bench_2/tasks",
+    "src/instrumental_evasion/tasks/terminal_bench_lite/tasks",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501", "E731"]
