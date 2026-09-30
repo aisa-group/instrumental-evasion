@@ -6,6 +6,14 @@ build-backend = "hatchling.build"
 name = "instrumental-evasion"
 version = "1.0.0"
 description = "Code for 'Instrumental Monitor Evasion Emerges Under Ordinary Task Pressure'"
+authors = [
+    {name = "David Schmotz"},
+    {name = "Derck Prinzhorn"},
+    {name = "Luca Beurer-Kellner"},
+    {name = "Anselm Paulus"},
+    {name = "Ameya Prabhu"},
+    {name = "Maksym Andriushchenko"},
+]
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE", "NOTICE.md"]

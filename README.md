@@ -1,7 +1,8 @@
 # Instrumental Monitor Evasion Emerges Under Ordinary Task Pressure
 
-Code for the paper *Instrumental Monitor Evasion Emerges Under Ordinary Task
-Pressure* (anonymous submission).
+Code for the paper [*Instrumental Monitor Evasion Emerges Under Ordinary Task
+Pressure*](https://arxiv.org/abs/2609.30217) by David Schmotz, Derck Prinzhorn,
+Luca Beurer-Kellner, Anselm Paulus, Ameya Prabhu, and Maksym Andriushchenko.
 
 An agent receives an ordinary task whose completion requires an operation that
 an operator policy prohibits. A synchronous LLM monitor reviews every tool call
@@ -247,10 +248,14 @@ they are not examples of harmful actions.
 ## Citation
 
 ```bibtex
-@article{anonymous2026instrumental,
+@article{schmotz2026instrumental,
   title   = {Instrumental Monitor Evasion Emerges Under Ordinary Task Pressure},
-  author  = {Anonymous Authors},
-  year    = {2026}
+  author  = {Schmotz, David and Prinzhorn, Derck and Beurer-Kellner, Luca and
+             Paulus, Anselm and Prabhu, Ameya and Andriushchenko, Maksym},
+  journal = {arXiv preprint arXiv:2609.30217},
+  year    = {2026},
+  doi     = {10.48550/arXiv.2609.30217},
+  url     = {https://arxiv.org/abs/2609.30217}
 }
 ```
 
