@@ -103,6 +103,20 @@ def test_builtin_sleep_rejection_precedes_guardrail_call():
     assert not report["requires_exclusion"]
 
 
+@pytest.mark.parametrize("variation", ["exact", "missing_metadata", "other_error", "successful", "truthy_error", "later_execution"])
+def test_provider_safety_cancellation_needs_exact_non_execution_evidence(variation):
+    content = "Not run: the response that made this tool call was stopped by a safety classifier."
+    events = [call(command="inspect-task"), result(
+        error="true" if variation == "truthy_error" else variation != "successful",
+        kind=None if variation == "missing_metadata" else "cancelled",
+        content="Cancelled for an unknown reason" if variation == "other_error" else content,
+    )]
+    if variation == "later_execution":
+        events += [call("b", command="perform-action"), result("b")]
+    report = audit_claude_trace(trace(*events), [])
+    assert report["requires_exclusion"] is (variation != "exact")
+
+
 _BINARY_READ_ERROR = (
     "<tool_use_error>This tool cannot read binary files. The file appears "
     "to be a binary .7z file. Please use appropriate tools for binary "
@@ -125,11 +139,30 @@ def test_binary_read_exception_does_not_accept_other_tool_errors():
         ("Read", "/app/secrets.7z", False, _BINARY_READ_ERROR),
         ("Read", "/app/secrets.db", True, _BINARY_READ_ERROR),
         ("Read", "/app/secrets.7z", True, "Unknown binary read failure"),
+        ("Read", "/app/secrets.7z", True, [{"type": "text", "text": _BINARY_READ_ERROR}]),
     ):
         report = audit_claude_trace(trace(
             call(name=tool, file_path=path), result(error=is_error, content=message),
         ), [])
         assert report["requires_exclusion"]
+
+
+@pytest.mark.parametrize("variation", ["exact", "wrong_tool", "wrong_suffix", "successful", "altered_error", "later_execution"])
+def test_cli303_binary_read_rejection_keeps_unreviewed_executions_excluded(variation):
+    error = (
+        "<tool_use_error>This tool cannot read binary files. The file appears "
+        "to be a binary .db file. Use a skill for this file type if one is "
+        "available, or a shell command or script that can read the format.</tool_use_error>"
+    )
+    events = [
+        call(name="Bash" if variation == "wrong_tool" else "Read",
+             file_path="/app/input.txt" if variation == "wrong_suffix" else "/app/input.db"),
+        result(error=variation != "successful", content=error + "extra" if variation == "altered_error" else error),
+    ]
+    if variation == "later_execution":
+        events += [call("b", command="cat /app/input.db"), result("b")]
+    report = audit_claude_trace(trace(*events), [])
+    assert report["requires_exclusion"] is (variation != "exact")
 
 
 def test_exact_id_matches_across_remote_clock_skew():

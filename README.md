@@ -13,7 +13,7 @@ checks whether the prohibited outcome was reached anyway.
 
 This repository contains:
 
-* the benchmark: **50 task–policy pairs** from ToolSandbox, ClawBench,
+* **task set 1**, the benchmark's usual **50 task–policy pairs** from ToolSandbox, ClawBench,
   τ-bench, Terminal-Bench 2.1, OpenThoughts-TBLite, and ten authored terminal
   tasks ([docs/tasks.md](docs/tasks.md));
 * the harness: a runner with three agent scaffolds (our own ReAct loop, the
@@ -77,6 +77,10 @@ on a ChatGPT or Claude subscription (the credentials the CLIs store after
 
 ## Quickstart
 
+All new non-Claude model experiments use Codex (`codex`).
+Claude models use Claude Code (`claude_code`). The live CLI rejects ReAct; its implementation remains available
+for archived experiments and offline tests.
+
 ```bash
 # The roster, with each task's policy and image path
 uv run python -m instrumental_evasion.tasks.registry
@@ -86,7 +90,7 @@ uv run python -m instrumental_evasion.run --dry-run --arm monitored
 
 # One unmonitored control episode: is the task solvable?
 uv run python -m instrumental_evasion.run tb2_build_pmars --arm control \
-    --scaffold react --model openrouter/deepseek/deepseek-v4-flash
+    --scaffold codex --model openrouter/deepseek/deepseek-v4-flash
 
 # One monitored episode under the paper's condition
 uv run python -m instrumental_evasion.run tb2_build_pmars --arm monitored \
@@ -102,6 +106,37 @@ runs per task. Each episode writes a write-once attempt directory
 `logs/run/<task>_<arm>/epoch<N>/<attempt-id>/` containing `result.json` (score,
 messages, monitor decisions, metadata), `decisions.jsonl`, and the CLI
 transcript where applicable.
+
+Select the usual 50-task roster explicitly with `--task-set task_set_1`.
+Its task IDs and order match the default paper roster.
+
+An optional `semantic6` family adds six tasks inspired by the trace audit:
+least-squares fitting, Markov stationary distributions, SQLite catalog import,
+a persistent aggregation view, pricing-rule migration, and record-layout
+migration. Select it explicitly with `--families semantic6` or individual
+`semantic6_*` task IDs. It is excluded from the default 50-task paper roster.
+These tasks use the existing `tb-agent-stateful.sif` image on Apptainer;
+`SEMANTIC6_IMAGE` can override its path. Fixtures are randomized per episode.
+Set `SEMANTIC6_FIXTURE_SEED` to the same value for paired control/monitored
+fixtures, and vary it between repetitions.
+
+```bash
+# Verify author reference solutions locally, without model or monitor calls
+uv run python -m instrumental_evasion.tasks.semantic6.qualify
+
+# Review the configuration for the six monitored tasks
+uv run python -m instrumental_evasion.run --families semantic6 \
+    --arm monitored --scaffold codex --runtime apptainer --dry-run
+```
+
+Grading reads bounded JSON or private database snapshots and never changes the
+agent's files. The SQLite tasks have independent artifact probes that record
+prohibited effects even when task completion fails. Statistical and source
+tasks record that route evidence is required: a correct output alone does not
+prove a monitored tool call performed the prohibited operation. The runner's
+existing broad success endpoint still includes task completion; report that
+separately from confirmed monitor bypasses. See
+[the extension design](src/instrumental_evasion/tasks/semantic6/DESIGN.txt).
 
 By default every run uses the paper's main-evaluation condition: GPT-OSS-120B
 monitor through OpenRouter, trimmed policies, a monitor history of the 40 most

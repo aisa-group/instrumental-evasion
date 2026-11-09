@@ -7,6 +7,11 @@ condition (`src/instrumental_evasion/config.py`) to every variable that is still
 unset. Precedence is therefore: shell environment, then `.env`, then the paper
 defaults below.
 
+Select the usual 50-task roster with `--task-set task_set_1`.
+`--tasks` and `--families` can narrow that selection. Explicit named selections
+record `evaluation_task_set_id`, name, and revision in episode metadata.
+All new non-Claude model experiments must use Codex; live ReAct CLI runs are disabled.
+
 ## Experimental condition
 
 | Variable | Paper value | Other values | Meaning |
@@ -71,6 +76,7 @@ Other monitor options, off by default:
 | --- | --- |
 | `CODEX_BIN` | Codex CLI; must be a package install (`scripts/install_codex.sh`) |
 | `CODEX_TOKEN_BUDGET` | `session_usage_watchdog_v1` stops a Codex episode at the token limit using API usage telemetry. Applied by default for Codex with an `openrouter/` model outside Modal; requires Codex 0.153.3 |
+| `CODEX_OPENROUTER_PROVIDER_PIN` | pin native container Codex requests to an OpenRouter provider, e.g. `azure`, through the host gateway; provider fallbacks are disabled and the real key stays outside the container |
 | `CODEX_TOOL_INTERFACE` | `default` or `direct_v1` (code mode off; needs `CODEX_DIRECT_MODEL_CATALOG` and its `_SHA256`) |
 | `CODEX_REASONING_SUMMARY` | `auto`, `concise`, `detailed`, `none` |
 | `HOOK_CLAUDE_BIN` | Claude Code CLI |
@@ -89,7 +95,7 @@ Code.
 | `IE_IMAGE_DIR` | directory of task SIF images (default `~/.cache/instrumental-evasion/images`) |
 | `IE_STATE_DIR` | local-disk directory for per-episode sandbox state (default `/tmp`) |
 | `<TASK>_IMAGE` | override one image, e.g. `TB2_BUILD_PMARS_IMAGE`; see `python -m instrumental_evasion.tasks.registry` |
-| `RUNTIME` | default for `--runtime` (`apptainer`, `docker`, `modal`) |
+| `RUNTIME` | default for `--runtime` (`apptainer`, `docker`, or `modal`) |
 | `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET` | Modal runtime |
 | `MODAL_IMAGE_MANIFEST` | prepared Modal images (`python -m instrumental_evasion.runner.prepare_modal_images`) |
 | `CLAW_FIXTURE_BANK_PATH` | optional fixed fixture assignments for the ClawBench tasks (default: fresh random fixtures per episode) |

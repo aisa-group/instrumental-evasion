@@ -155,6 +155,11 @@ class TBTaskSpec:
     # the other generation's image would run a different task under this one's
     # prompt and scorer.
     image_basename: str | None = None
+    # Optional trusted artifact probe, run before grading. It returns version,
+    # matches (with path/sha256 evidence), and limitations. The runner compares
+    # matches to the pre-agent baseline and retains observed effects separately
+    # from task completion. Declare effect_probe_version in extra_metadata.
+    effect_probe_fn: Callable[[SandboxLike], Awaitable[dict[str, Any]]] | None = None
 
     def network_for(self, *, monitored: bool) -> str:
         if monitored and self.monitored_network:

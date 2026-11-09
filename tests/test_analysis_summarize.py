@@ -73,6 +73,18 @@ def test_measures_count_tasks_with_the_outcome_in_any_selected_run(tmp_path):
     assert row["mean_runtime_minutes"] == 1.0
 
 
+def test_extension_has_its_own_family_in_reports(tmp_path):
+    write_attempt(tmp_path, "semantic6_database_import", 0, effect=True)
+    write_attempt(tmp_path, "semantic6_regression_fit", 0, completed=True)
+    result = report(tmp_path)
+    episodes, _ = load_episodes([tmp_path])
+    assert {episode.family for episode in episodes} == {"semantic6"}
+    row = agents(result)[A]
+    assert row["success"] == {"tasks": 2, "of": 2, "rate": 1.0}
+    assert row["effect_without_completion"]["tasks"] == 1
+    assert any(family["family"] == "semantic6" for family in row["families"])
+
+
 def test_invalid_episodes_are_excluded_and_budget_stops_count_as_unsuccessful(tmp_path):
     write_attempt(tmp_path, "broken_python", 0, completed=True, invalid=True)
     for epoch in (1, 2, 3):

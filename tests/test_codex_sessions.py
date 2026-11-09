@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -60,6 +61,30 @@ def test_credentials_exclude_whole_file_without_changing_source(tmp_path):
     assert not list(capture.outdir.rglob("*.jsonl"))
     assert path.read_bytes() == original
     assert "private-token" not in (capture.outdir / "codex-sessions.json").read_text()
+
+
+def test_account_metadata_does_not_exclude_full_rollouts_but_oauth_tokens_do(tmp_path):
+    home = tmp_path / "home"
+    path = make_session(home)
+    account_id = "synthetic-account-identifier"
+    auth = {"tokens": {"account_id": account_id, "access_token": "synthetic-private-access",
+                       "refresh_token": "synthetic-private-refresh", "id_token": "synthetic-private-id"}}
+    (home / "auth.json").write_text(json.dumps(auth))
+    events = [json.loads(line) for line in path.read_text().splitlines()]
+    events[0]["payload"]["creator_account_id"] = account_id
+    path.write_text("\n".join(json.dumps(event) for event in events) + "\n")
+    secrets = CodexScaffold._capture_secrets(home, {})
+    assert account_id not in secrets
+    assert all(auth["tokens"][name] in secrets for name in ("access_token", "refresh_token", "id_token"))
+    report = asyncio.run(SessionCapture(tmp_path / "safe", home, secrets=secrets).collect(None))
+    assert report["status"] == "collected" and report["files"][0]["encrypted_reasoning"] == 1
+    assert (tmp_path / "safe" / report["files"][0]["path"]).read_bytes() == path.read_bytes()
+    with path.open("a") as stream:
+        stream.write(json.dumps({"type": "response_item", "payload": {
+            "type": "message", "role": "assistant", "content": auth["tokens"]["access_token"]}}) + "\n")
+    report = asyncio.run(SessionCapture(tmp_path / "unsafe", home, secrets=secrets).collect(None))
+    assert report["status"] == "incomplete"
+    assert any(item["status"] == "excluded_credential" for item in report["files"])
 
 
 def test_credential_exclusion_preserves_only_safe_input_records(tmp_path):
@@ -141,6 +166,39 @@ def test_summary_request_is_explicit_and_recorded(monkeypatch):
     assert scaffold.describe()["agent_reasoning_summary"] == "detailed"
     with pytest.raises(ValueError, match="reasoning summary"):
         CodexScaffold(reasoning_summary="invalid")
+
+
+def test_native_codex_azure_gateway_keeps_api_key_outside_container(monkeypatch, tmp_path):
+    from instrumental_evasion.runner import openrouter_gateway
+
+    monkeypatch.setenv("CODEX_OPENROUTER_PROVIDER_PIN", "azure")
+    monkeypatch.setenv("CODEX_TOKEN_BUDGET", "off")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-real-provider-key")
+    calls = []
+
+    @contextmanager
+    def fake_gateway(key, path, **kwargs):
+        calls.append((key, kwargs))
+        yield {"base_url": "http://127.0.0.1:12345/v1", openrouter_gateway.TOKEN_ENV: "private-ephemeral-token"}
+
+    monkeypatch.setattr(openrouter_gateway, "gateway", fake_gateway)
+    scaffold = CodexScaffold(model="openrouter/openai/gpt-6-luna")
+    ctx = SimpleNamespace(outdir=tmp_path, spec=SimpleNamespace(container_env={}), gate=None)
+
+    async def run_captured(context):
+        assert scaffold._api_provider.base_url == "http://127.0.0.1:12345/v1"
+        env = scaffold._env(context, "http://gate", "http://proxy")
+        assert env[openrouter_gateway.TOKEN_ENV] == "private-ephemeral-token"
+        assert "OPENROUTER_API_KEY" not in env and "synthetic-real-provider-key" not in env.values()
+        return ScaffoldResult("agent_stopped")
+
+    monkeypatch.setattr(scaffold, "_run_captured", run_captured)
+    result = asyncio.run(scaffold.run(ctx))
+    assert calls[0][0] == "synthetic-real-provider-key" and calls[0][1]["provider"] == "azure"
+    assert result.extra["agent_api_route"]["subscription_auth_used"] is False
+    assert scaffold._api_provider.api_key_env == "OPENROUTER_API_KEY"
+    assert scaffold._gateway_config is None and not scaffold.token_budget_watchdog
+    assert scaffold.describe()["provider_credential_agent_visible"] is False
 
 
 @pytest.mark.parametrize("ending", ["submit", "desisted", "time_limit", "error", "exception", "cancel"])

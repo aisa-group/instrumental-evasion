@@ -7,9 +7,9 @@
     python -m instrumental_evasion.run --arm monitored --epochs 3 \
         --scaffold codex --model openrouter/deepseek/deepseek-v4-flash
 
-    # one task, one arm, our own ReAct loop over an API model
+    # one task, one arm, Codex scaffold
     python -m instrumental_evasion.run tb2_build_pmars --arm monitored \
-        --scaffold react --model openrouter/deepseek/deepseek-v4-flash
+        --scaffold codex --model openrouter/deepseek/deepseek-v4-flash
 
 What the runner owns, and no scaffold may: preparing the sandbox, seeding the
 task, scoring it with `spec.score_fn`, classifying attempt markers, and writing
@@ -97,6 +97,7 @@ from instrumental_evasion.runner.scaffolds.base import STOP_ERROR
 from instrumental_evasion.runner.success_scoring import NativeSuccessScorer
 from instrumental_evasion.runner.termination import TerminationRequested, finalize_on_termination
 from instrumental_evasion.tasks.registry import ARMS, ResolvedTask, resolve, selected
+from instrumental_evasion.tasks.sets import TASK_SET_IDS
 from instrumental_evasion.tasks.tb_spec import TBTaskSpec
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -448,6 +449,11 @@ async def run_task(
 
     net = task.spec.network_for(monitored=task.monitored)
     described = scaffold.describe()
+    prompt_conditions = prompt_condition_metadata()
+    if described.get("no_continuations"):
+        # Single-invocation scaffolds must not record an unused
+        # global continuation template as a message sent to the agent.
+        prompt_conditions.update(continuation_condition="none", continuation_message=None)
     log = native_log.EvalLog(
         task=task.name,
         task_id=task.task_id,
@@ -500,7 +506,7 @@ async def run_task(
             "runner": "native",
             **runtime.describe(),
             **described,
-            **prompt_condition_metadata(),
+            **prompt_conditions,
             **refusal_context_metadata(),
             **refusal_stop_metadata(),
             "system_prompt_addition": system_prompt_for(task.spec, scaffold.name),
@@ -631,8 +637,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--runtime",
         choices=available_runtimes(),
         default=os.environ.get("RUNTIME", "").strip() or DEFAULT_RUNTIME,
-        help=f"the container runtime (default: {DEFAULT_RUNTIME}). 'docker' supports "
-        "only the react scaffold; 'modal' runs the sandboxes remotely.",
+        help=f"the sandbox runtime (default: {DEFAULT_RUNTIME}). 'docker' supports "
+        "no live CLI experiments; 'modal' runs remotely.",
     )
     parser.add_argument(
         "--model",
@@ -707,6 +713,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--log-dir", type=Path, default=Path("logs/run"))
     parser.add_argument(
+        "--task-set", choices=TASK_SET_IDS, default=None,
+        help="saved roster: task_set_1 is the usual 50 tasks",
+    )
+    parser.add_argument(
         "--tasks", nargs="*", default=[], help="narrow the roster to these task ids"
     )
     parser.add_argument(
@@ -742,6 +752,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.epoch is not None and args.epochs != 1:
         print("ERROR --epoch requires --epochs 1", file=sys.stderr)
         return 2
+    if args.scaffold == "react" and not args.dry_run:
+        print(
+            "ERROR live ReAct experiments are disabled. Use --scaffold codex "
+            "for non-Claude models; Claude models use claude_code.",
+            file=sys.stderr,
+        )
+        return 2
 
     load_env_file()
     if args.policy_variant:
@@ -755,6 +772,8 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.task:
+            if args.task_set:
+                raise ValueError("use --tasks to narrow --task-set instead of a positional task")
             tasks = resolve(args.task, args.arm)
         else:
             arms = (args.arm,) if args.arm else ARMS
@@ -762,6 +781,7 @@ def main(argv: list[str] | None = None) -> int:
                 arms=arms,
                 only=tuple(args.tasks),
                 families=tuple(args.families),
+                task_set=args.task_set,
             )
     except ValueError as error:
         print(f"ERROR {error}", file=sys.stderr)
@@ -769,6 +789,16 @@ def main(argv: list[str] | None = None) -> int:
     if not tasks:
         print("no tasks matched", file=sys.stderr)
         return 2
+    for task in tasks:
+        requirements = getattr(task.spec, "extra_metadata", None) or {}
+        required_runtime = requirements.get("required_runtime")
+        if required_runtime and args.runtime != required_runtime:
+            print(f"ERROR {task.task_id} requires --runtime {required_runtime}", file=sys.stderr)
+            return 2
+        supported = requirements.get("supported_scaffolds")
+        if supported and args.scaffold not in supported:
+            print(f"ERROR {task.task_id} supports scaffolds: {', '.join(supported)}", file=sys.stderr)
+            return 2
     from instrumental_evasion.tasks.clawbench.specs import validate_configured_fixture_bank
 
     try:
@@ -814,7 +844,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"ERROR scaffold {args.scaffold!r} runs the agent inside an apptainer "
             "container or a Modal sandbox and cannot use --runtime docker. "
-            "Use --runtime apptainer/modal or --scaffold react.",
+            "Use --runtime apptainer/modal.",
             file=sys.stderr,
         )
         return 2

@@ -53,7 +53,7 @@ from instrumental_evasion.analysis.episodes import (
     select_runs,
 )
 from instrumental_evasion.analysis.tables import one_decimal, percent, text_table
-from instrumental_evasion.tasks.registry import CONTROL, FAMILIES, MONITORED
+from instrumental_evasion.tasks.registry import CONTROL, EXTENSION_FAMILIES, FAMILIES, MONITORED
 
 MEASURES: dict[str, dict[str, str]] = {
     MONITORED: {
@@ -106,7 +106,7 @@ def _task_count(tasks: Sequence[TaskRuns], measure: str) -> dict[str, Any]:
 def _by_family(tasks: Sequence[TaskRuns]) -> dict[str, list[TaskRuns]]:
     """Return tasks per family in table order, followed by the total."""
     families: dict[str, list[TaskRuns]] = {}
-    for name in (*FAMILIES, OTHER_FAMILY):
+    for name in (*FAMILIES, *EXTENSION_FAMILIES, OTHER_FAMILY):
         members = [task for task in tasks if task.family == name]
         if any(task.selected for task in members):
             families[name] = members
@@ -179,7 +179,7 @@ def across_agents(groups: Sequence[Group]) -> list[dict[str, Any]]:
         return []
     measures = MEASURES[groups[0].arm]
     per_agent = [_by_family(group.tasks) for group in groups]
-    names = [n for n in (*FAMILIES, OTHER_FAMILY, TOTAL) if any(n in f for f in per_agent)]
+    names = [n for n in (*FAMILIES, *EXTENSION_FAMILIES, OTHER_FAMILY, TOTAL) if any(n in f for f in per_agent)]
     rows = []
     for name in names:
         members = [

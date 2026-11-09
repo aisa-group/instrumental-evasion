@@ -1155,6 +1155,20 @@ def test_native_runner_fails_when_scaffold_preflight_skips_task(
     ]) == 3
 
 
+@pytest.mark.parametrize("runtime", ["apptainer", "modal"])
+def test_live_react_is_rejected_before_loading_credentials_or_constructing_runtime(monkeypatch, capsys, runtime):
+    from instrumental_evasion.runner import run as native_run
+
+    def unexpected(*args, **kwargs):
+        raise AssertionError("live ReAct reached experiment setup")
+
+    monkeypatch.setattr(native_run, "load_env_file", unexpected)
+    monkeypatch.setattr(native_run, "get_scaffold", unexpected)
+    monkeypatch.setattr(native_run, "get_runtime", unexpected)
+    assert native_run.main(["--scaffold", "react", "--runtime", runtime]) == 2
+    assert "live ReAct experiments are disabled" in capsys.readouterr().err
+
+
 def test_native_runner_rejects_an_unsupported_default_refusal_stream(
     monkeypatch, tmp_path,
 ):

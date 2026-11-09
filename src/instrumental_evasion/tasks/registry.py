@@ -1,4 +1,4 @@
-"""The 50 task-policy pairs of the paper, and how a task name resolves to a run.
+"""Task set 1 (the paper's 50 pairs), optional extensions, and task/arm resolution.
 
 Every task is a `TBTaskSpec` (task as data: image, prompt, policy, scorer). The
 roster below fixes the task set and its order. Each task runs in one of two
@@ -12,9 +12,10 @@ arms:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 
+from instrumental_evasion.tasks.sets import load_task_set
 from instrumental_evasion.tasks.tb_spec import TBTaskSpec
 
 CONTROL = "control"
@@ -91,6 +92,36 @@ FAMILY_OF: dict[str, str] = {
     task: family for family, tasks in FAMILIES.items() for task in tasks
 }
 
+# Extensions are opt-in. The frozen paper roster and default batch stay at 50.
+EXTENSION_FAMILIES: dict[str, tuple[str, ...]] = {
+    "semantic6": (
+        "semantic6_regression_fit",
+        "semantic6_markov_stationary",
+        "semantic6_database_import",
+        "semantic6_database_view",
+        "semantic6_pricing_port",
+        "semantic6_record_port",
+    ),
+}
+EXTENSION_TASK_IDS = tuple(task for tasks in EXTENSION_FAMILIES.values() for task in tasks)
+EXTENSION_FAMILY_OF = {
+    task: family for family, tasks in EXTENSION_FAMILIES.items() for task in tasks
+}
+
+
+def task_family(task_id: str, default: str = "other") -> str:
+    return FAMILY_OF.get(task_id, EXTENSION_FAMILY_OF.get(task_id, default))
+
+
+@cache
+def extension_spec_registry() -> dict[str, TBTaskSpec]:
+    from instrumental_evasion.tasks.semantic6 import specs
+
+    registered = {spec.id: spec for spec in specs.SPECS}
+    if set(registered) != set(EXTENSION_TASK_IDS) or set(registered) & set(TASK_IDS):
+        raise RuntimeError("extension task registry does not match its roster")
+    return {task: registered[task] for task in EXTENSION_TASK_IDS}
+
 
 @cache
 def spec_registry() -> dict[str, TBTaskSpec]:
@@ -129,7 +160,7 @@ class ResolvedTask:
 
 
 def _resolve(task_id: str, arm: str) -> ResolvedTask:
-    spec = spec_registry()[task_id]
+    spec = (extension_spec_registry() if task_id in EXTENSION_FAMILY_OF else spec_registry())[task_id]
     return ResolvedTask(
         task_id=task_id,
         name=f"{task_id}_{arm}",
@@ -144,15 +175,16 @@ def resolve(task: str, arm: str | None = None) -> list[ResolvedTask]:
 
     A bare task id without an arm returns both arms.
     """
-    if task in FAMILY_OF:
+    known = FAMILY_OF.keys() | EXTENSION_FAMILY_OF.keys()
+    if task in known:
         return [_resolve(task, candidate) for candidate in ([arm] if arm else ARMS)]
     for candidate in ARMS:
         suffix = f"_{candidate}"
-        if task.endswith(suffix) and task[: -len(suffix)] in FAMILY_OF:
+        if task.endswith(suffix) and task[: -len(suffix)] in known:
             if arm is not None and arm != candidate:
                 raise ValueError(f"{task!r} names the {candidate} arm, not {arm!r}")
             return [_resolve(task[: -len(suffix)], candidate)]
-    raise ValueError(f"{task!r} is not a task in the roster; known ids: {list(TASK_IDS)}")
+    raise ValueError(f"{task!r} is not a task in the roster; known ids: {list(TASK_IDS + EXTENSION_TASK_IDS)}")
 
 
 def selected(
@@ -160,28 +192,57 @@ def selected(
     arms: tuple[str, ...] = ARMS,
     only: tuple[str, ...] = (),
     families: tuple[str, ...] = (),
+    task_set: str | None = None,
 ) -> list[ResolvedTask]:
     """The roster as runnable (task, arm) pairs, optionally narrowed."""
-    unknown = [task for task in only if task not in FAMILY_OF]
-    unknown += [family for family in families if family not in FAMILIES]
+    unknown = [task for task in only if task not in FAMILY_OF and task not in EXTENSION_FAMILY_OF]
+    unknown += [family for family in families if family not in FAMILIES and family not in EXTENSION_FAMILIES]
     if unknown:
         raise ValueError(f"unknown tasks or families: {unknown}")
-    return [
+    include_extensions = any(task in EXTENSION_FAMILY_OF for task in only) or any(family in EXTENSION_FAMILIES for family in families)
+    manifest = load_task_set(task_set) if task_set else None
+    task_ids = (tuple(manifest["task_ids"]) if manifest else
+                TASK_IDS + EXTENSION_TASK_IDS if include_extensions else TASK_IDS)
+    if manifest and manifest["id"] == "task_set_1" and task_ids != TASK_IDS:
+        raise ValueError("task_set_1 must match the frozen 50-task roster")
+    if any(task not in FAMILY_OF and task not in EXTENSION_FAMILY_OF for task in task_ids):
+        raise ValueError("task set contains unknown task IDs")
+    tasks = [
         _resolve(task, arm)
-        for task in TASK_IDS
-        if (not only or task in only) and (not families or FAMILY_OF[task] in families)
+        for task in task_ids
+        if (not only or task in only) and (not families or task_family(task) in families)
         for arm in arms
     ]
+    if manifest:
+        evidence = {entry["task_id"]: entry for entry in manifest.get("tasks", [])}
+        for task in tasks:
+            entry = evidence.get(task.task_id)
+            if entry and (task.spec.extra_metadata or {}).get("definition_sha256") != entry["definition_sha256"]:
+                raise ValueError(f"{task.task_id} changed since admission to {manifest['id']}; requalify it")
+        tasks = [replace(task, spec=replace(task.spec, extra_metadata={
+            **(task.spec.extra_metadata or {}),
+            "evaluation_task_set_id": manifest["id"],
+            "evaluation_task_set_name": manifest["name"],
+            "evaluation_task_set_revision": manifest["revision"],
+        })) for task in tasks]
+    return tasks
 
 
 def main() -> None:
     registry = spec_registry()
+    print("task set 1 (the usual 50 tasks; select with --task-set task_set_1)")
     for family, tasks in FAMILIES.items():
         print(f"{family} ({len(tasks)})")
         for task in tasks:
             spec = registry[task]
             print(f"  {task:<42} policy={spec.policy:<34} image={spec.image()}")
     print(f"total: {len(TASK_IDS)} tasks")
+    extensions = extension_spec_registry()
+    for family, tasks in EXTENSION_FAMILIES.items():
+        print(f"optional {family} ({len(tasks)}); select with --families {family}")
+        for task in tasks:
+            spec = extensions[task]
+            print(f"  {task:<42} policy={spec.policy:<34} image={spec.image()}")
 
 
 if __name__ == "__main__":

@@ -14,9 +14,13 @@ __pycache__/
 # Experiment output
 logs/
 runs/
+# Selected provenance fixtures are tracked explicitly; raw campaigns stay local.
+results/
+.condor_dagman.out
 
-# Container images (build with scripts/build_images.sh)
+# Built container and VM images
 *.sif
+*.qcow2
 *-sandbox/
 images/build/
 .apptainer/

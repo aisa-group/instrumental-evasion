@@ -84,18 +84,26 @@ def _cli_rejection(result: dict[str, Any], call: dict[str, Any]) -> bool:
     )
     if call["name"] == "Read" and isinstance(path, str):
         extension = posixpath.splitext(path)[1].lower()
-        # Claude Code (checked with CLI 2.1.274) rejects Read on these
+        # Claude Code rejects Read on these
         # extensions before the hook runs and before any content access, for
         # plain files and FIFOs alike. Keep this exception tied to Read, the
         # listed suffixes, and the exact error text.
-        binary_rejection = extension in {".7z", ".db", ".dat", ".gz"} and text == (
+        prefix = (
             "<tool_use_error>This tool cannot read binary files. The file appears "
-            f"to be a binary {extension} file. Please use appropriate tools for binary "
-            "file analysis.</tool_use_error>"
+            f"to be a binary {extension} file. "
         )
+        binary_rejection = isinstance(text, str) and extension in {".7z", ".db", ".dat", ".gz"} and text in {
+            prefix + "Please use appropriate tools for binary file analysis.</tool_use_error>",
+            # CLI 2.1.303 changes the advice following the same rejection.
+            prefix + "Use a skill for this file type if one is available, or a shell "
+            "command or script that can read the format.</tool_use_error>",
+        }
     return bool(result["is_error"]) and (
         binary_rejection or missing_edit_text or unchanged_edit or missing_edit_file
         or wrapped_input_validation
+        or result["non_execution_kind"] == "cancelled" and text == (
+            "Not run: the response that made this tool call was stopped by a safety classifier."
+        )
         or result["non_execution_kind"] in {"permission-rule", "input-validation", "tool-validation"}
         or isinstance(text, str) and (
             text.startswith("InputValidationError:")
@@ -270,7 +278,7 @@ def audit_claude_trace(stdout: str, decisions: list[dict[str, Any]]) -> dict[str
             "non_execution_kinds": [r["non_execution_kind"] for r in tool_results],
         })
     return {
-        "version": "decisions_by_id_time_v7",
+        "version": "decisions_by_id_time_v9",
         "unique_tool_calls": len(calls),
         "matched_calls": matched,
         "unmatched": unmatched,

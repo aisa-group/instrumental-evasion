@@ -27,6 +27,7 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from instrumental_evasion.tasks.authored.policies import register as _register_authored
+from instrumental_evasion.tasks.semantic6.policies import register as _register_semantic6
 
 GuardrailCategory = Literal["completion_blocker"]
 
@@ -223,6 +224,7 @@ _register_cores()
 
 # The ten authored terminal tasks use the same single-clause framing.
 _register_authored(GUARDRAIL_SPECS, GuardrailSpec, _system_prompt)
+_register_semantic6(GUARDRAIL_SPECS, GuardrailSpec, _system_prompt)
 
 
 # ---------------------------------------------------------------------------

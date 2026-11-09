@@ -133,8 +133,13 @@ OPENROUTER_PROVIDER = "openrouter"
 CHATGPT_PROVIDER = "chatgpt_subscription"
 OPENROUTER_MODEL_PREFIX = "openrouter/"
 OPENROUTER_CONTEXT_WINDOWS = {
+    # OpenRouter model catalogue, 2026-10-13: advertised 262144, with
+    # current top-provider context 256000. Use the smaller serving limit.
+    "qwen/qwen3.5-9b": 256_000,
     "openai/gpt-6-astra": 1_050_000,
     "openai/gpt-6-sol": 1_050_000,
+    "openai/gpt-6-luna": 1_050_000,
+    "openai/gpt-6.1-sol": 1_050_000,
     "openai/gpt-5.6-luna": 1_050_000,
     "openai/gpt-5.6-sol": 1_050_000,
     "openai/gpt-5.6-terra": 1_050_000,
@@ -261,7 +266,7 @@ class CodexScaffold(CLIScaffoldBase):
         tool_interface: str | None = None,
     ) -> None:
         budget_mode = os.environ.get("CODEX_TOKEN_BUDGET", "")
-        if budget_mode not in {"", TOKEN_BUDGET_VERSION}:
+        if budget_mode not in {"", "off", TOKEN_BUDGET_VERSION}:
             raise ValueError("Unsupported CODEX_TOKEN_BUDGET mode.")
         self.token_budget_watchdog = budget_mode == TOKEN_BUDGET_VERSION
         self.tool_scope = tool_scope or os.environ.get("CODEX_TOOL_SCOPE", "native")
@@ -286,6 +291,10 @@ class CodexScaffold(CLIScaffoldBase):
                 f"one of {', '.join((CHATGPT_PROVIDER, *API_PROVIDERS))}"
             )
         self._api_provider = API_PROVIDERS.get(self.provider)
+        self.provider_pin = os.environ.get("CODEX_OPENROUTER_PROVIDER_PIN") or None
+        if self.provider_pin and self.provider != OPENROUTER_PROVIDER:
+            raise ValueError("A pinned OpenRouter provider requires an openrouter/ model")
+        self._gateway_config: dict[str, str] | None = None
         if self._api_provider is not None:
             if not model.startswith(self._api_provider.model_prefix):
                 raise ValueError(
@@ -380,7 +389,9 @@ class CodexScaffold(CLIScaffoldBase):
                 else "chatgpt_subscription"
             ),
             "agent_provider_model": self.provider_model,
-            "provider_credential_agent_visible": True,
+            "provider_credential_agent_visible": not bool(self.provider_pin),
+            "agent_provider_only": self.provider_pin,
+            "agent_provider_fallbacks": False if self.provider_pin else None,
             "provider_credential_exposure_approved": True,
             "provider_credential_retained": False,
             "turn_limit_enforced": False,
@@ -722,7 +733,8 @@ class CodexScaffold(CLIScaffoldBase):
         if profile != COMMAND_ONLY:
             env["RUNTIME_CONTEXT_PROFILE"] = profile
         if self._api_provider is not None:
-            env[self._api_provider.api_key_env] = os.environ[self._api_provider.api_key_env]
+            source = self._gateway_config or os.environ
+            env[self._api_provider.api_key_env] = source[self._api_provider.api_key_env]
         return env
 
     def _command(
@@ -815,6 +827,30 @@ class CodexScaffold(CLIScaffoldBase):
     # -- running ----------------------------------------------------------
 
     async def run(self, ctx: EpisodeContext) -> ScaffoldResult:
+        if not self.provider_pin:
+            return await self._run_captured(ctx)
+        from instrumental_evasion.runner.openrouter_gateway import TOKEN_ENV, gateway
+
+        original = self._api_provider
+        with gateway(os.environ[original.api_key_env], ctx.outdir / "openrouter-gateway.jsonl",
+                     model=self.provider_model, provider=self.provider_pin,
+                     capture_path=ctx.outdir / "upstream-responses.jsonl") as config:
+            self._gateway_config = config
+            self._api_provider = replace(original, base_url=config["base_url"], api_key_env=TOKEN_ENV)
+            try:
+                result = await self._run_captured(ctx)
+                result.extra["agent_api_route"] = {
+                    "provider_model": self.provider_model, "provider_only": [self.provider_pin],
+                    "allow_fallbacks": False, "subscription_auth_used": False,
+                    "gateway_log": "openrouter-gateway.jsonl",
+                    "upstream_response_capture": "upstream-responses.jsonl",
+                }
+                return result
+            finally:
+                self._gateway_config = None
+                self._api_provider = original
+
+    async def _run_captured(self, ctx: EpisodeContext) -> ScaffoldResult:
         if self.token_budget_watchdog and (
             hasattr(ctx.sandbox, "start_remote_gate")
             or self._api_provider is None
@@ -1364,7 +1400,10 @@ class CodexScaffold(CLIScaffoldBase):
                     values.add(key)
                 tokens = data.get("tokens", {})
                 if isinstance(tokens, dict):
-                    values.update(v for v in tokens.values() if isinstance(v, str) and v)
+                    # Codex records creator_account_id in session metadata.
+                    # That identifier is not an authentication credential.
+                    values.update(tokens[name] for name in ("id_token", "access_token", "refresh_token")
+                                  if isinstance(tokens.get(name), str) and tokens[name])
         # JSON events can escape characters in a credential.
         return tuple(values | {json.dumps(v)[1:-1] for v in values})
 

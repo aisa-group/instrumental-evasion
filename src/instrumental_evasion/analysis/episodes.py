@@ -24,7 +24,7 @@ from instrumental_evasion.runner.attempt_artifact import (
     validate_attempt,
     validate_attempt_id,
 )
-from instrumental_evasion.tasks.registry import FAMILY_OF, MONITORED, TASK_IDS
+from instrumental_evasion.tasks.registry import EXTENSION_TASK_IDS, MONITORED, TASK_IDS, task_family
 
 # Run-level metadata that defines a monitored condition. Episodes that differ
 # in any of these fields answer different questions and are never pooled.
@@ -73,7 +73,7 @@ class Episode:
 
     @property
     def family(self) -> str:
-        return FAMILY_OF.get(self.task_id, OTHER_FAMILY)
+        return task_family(self.task_id, OTHER_FAMILY)
 
     @property
     def effect_without_completion(self) -> bool:
@@ -91,7 +91,7 @@ class TaskRuns:
 
     @property
     def family(self) -> str:
-        return FAMILY_OF.get(self.task_id, OTHER_FAMILY)
+        return task_family(self.task_id, OTHER_FAMILY)
 
 
 @dataclass(frozen=True)
@@ -253,7 +253,8 @@ def require_single_condition(episodes: Iterable[Episode]) -> None:
 
 
 def _task_order(task_id: str) -> tuple[int, str]:
-    return (TASK_IDS.index(task_id) if task_id in FAMILY_OF else len(TASK_IDS), task_id)
+    roster = TASK_IDS + EXTENSION_TASK_IDS
+    return (roster.index(task_id) if task_id in roster else len(roster), task_id)
 
 
 def select_runs(episodes: Iterable[Episode], epochs: int | None) -> list[Group]:
